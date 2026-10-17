@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import pandas as pd
+import html
+
 import streamlit as st
 
-from extractor.export import review_table_records, to_csv, to_xlsx
+from extractor.export import review_table_html, to_csv, to_xlsx
 from extractor.money import fmt_money
 from extractor.pipeline import has_llm_credentials, load_bundled_samples, run_pipeline
 
@@ -42,27 +43,51 @@ CUSTOM_CSS = """
         padding: 0.6rem 0.8rem;
         border-radius: 10px;
     }
-    .flag-card {
-        background: #FDECEC;
-        border-left: 4px solid #B42318;
+    .flag-card, .warn-card, .ok-card {
         padding: 0.75rem 0.9rem;
         border-radius: 6px;
         margin-bottom: 0.5rem;
     }
-    .warn-card {
-        background: #FFF4D6;
-        border-left: 4px solid #B54708;
-        padding: 0.75rem 0.9rem;
-        border-radius: 6px;
-        margin-bottom: 0.5rem;
+    .flag-card { background: #FDECEC; border-left: 4px solid #B42318; }
+    .warn-card { background: #FFF4D6; border-left: 4px solid #B54708; }
+    .ok-card { background: #EEF6F0; border-left: 4px solid #027A48; }
+    table.review {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 0.92rem;
+        background: #fff;
+        border: 1px solid #E0D9CC;
+        border-radius: 8px;
+        overflow: hidden;
     }
-    .ok-card {
-        background: #EEF6F0;
-        border-left: 4px solid #027A48;
-        padding: 0.75rem 0.9rem;
-        border-radius: 6px;
-        margin-bottom: 0.5rem;
+    table.review th {
+        text-align: left;
+        background: #1F4E5F;
+        color: #F7F5F0;
+        padding: 0.55rem 0.65rem;
+        font-weight: 600;
     }
+    table.review td {
+        padding: 0.55rem 0.65rem;
+        vertical-align: top;
+        border-top: 1px solid #E8E2D6;
+    }
+    table.review tr.row-flag { background: #FDECEC; }
+    table.review tr.row-warn { background: #FFF4D6; }
+    table.review tr.row-ok { background: #F6FAF7; }
+    .badge {
+        display: inline-block;
+        padding: 0.1rem 0.5rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 700;
+    }
+    .badge-flag { background: #F8D7D3; color: #7A271A; }
+    .badge-warn { background: #F8E3B8; color: #7A2E0E; }
+    .badge-ok { background: #C8E6D4; color: #054F31; }
+    table.lines { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+    table.lines th, table.lines td { padding: 0.4rem 0.5rem; border-bottom: 1px solid #E8E2D6; text-align: left; }
+    table.lines th { color: #5C656A; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
 </style>
 """
 
@@ -144,21 +169,7 @@ def _render_results(reviewed) -> None:
     col_d.metric("Warnings", len(warnings))
 
     st.subheader("Review table")
-    frame = pd.DataFrame(review_table_records(reviewed))
-
-    def _style_status(column: pd.Series):
-        styles = []
-        for value in column:
-            if value == "Flagged":
-                styles.append("background-color: #FDECEC; color: #7A271A; font-weight: 600")
-            elif value == "Warning":
-                styles.append("background-color: #FFF4D6; color: #7A2E0E; font-weight: 600")
-            else:
-                styles.append("background-color: #EEF6F0; color: #054F31; font-weight: 600")
-        return styles
-
-    styler = frame.style.apply(_style_status, subset=["Status"]).apply(_row_tint, axis=1)
-    st.dataframe(styler, use_container_width=True, hide_index=True, height=360)
+    st.markdown(review_table_html(reviewed), unsafe_allow_html=True)
 
     left, right = st.columns([1.15, 0.85])
     with left:
@@ -168,10 +179,10 @@ def _render_results(reviewed) -> None:
             st.success("Every document in this batch passed the checks.")
         for row in notable:
             css = "flag-card" if row.status_label == "Flagged" else "warn-card"
-            reasons = "".join(f"<div>• {issue.message}</div>" for issue in row.issues)
+            reasons = "".join(f"<div>• {html.escape(issue.message)}</div>" for issue in row.issues)
             st.markdown(
-                f'<div class="{css}"><strong>{row.document.document_number}</strong> '
-                f"— {row.document.supplier}<br/>{reasons}</div>",
+                f'<div class="{css}"><strong>{html.escape(row.document.document_number)}</strong> '
+                f"— {html.escape(row.document.supplier)}<br/>{reasons}</div>",
                 unsafe_allow_html=True,
             )
     with right:
@@ -196,7 +207,10 @@ def _render_results(reviewed) -> None:
     selected = st.selectbox(
         "Open a document",
         options=list(range(len(reviewed))),
-        format_func=lambda i: f"{reviewed[i].document.document_number} · {reviewed[i].document.supplier} · {reviewed[i].status_label}",
+        format_func=lambda i: (
+            f"{reviewed[i].document.document_number} · "
+            f"{reviewed[i].document.supplier} · {reviewed[i].status_label}"
+        ),
     )
     chosen = reviewed[selected]
     doc = chosen.document
@@ -206,30 +220,31 @@ def _render_results(reviewed) -> None:
     meta_cols[2].write(f"**VAT:** {fmt_money(doc.vat_amount, doc.currency)}")
     meta_cols[3].write(f"**Total:** {fmt_money(doc.total, doc.currency)}")
     if doc.line_items:
-        st.table(
-            [
-                {
-                    "Description": item.description,
-                    "Qty": f"{item.quantity:g}",
-                    "Unit price": fmt_money(item.unit_price),
-                    "VAT": f"{(item.vat_rate * 100):.0f}%",
-                    "Amount": fmt_money(item.line_total),
-                }
-                for item in doc.line_items
-            ]
+        cells = "".join(
+            "<tr>"
+            f"<td>{html.escape(item.description)}</td>"
+            f"<td>{html.escape(_fmt_qty(item.quantity))}</td>"
+            f"<td>{html.escape(fmt_money(item.unit_price))}</td>"
+            f"<td>{html.escape(f'{(item.vat_rate * 100):.0f}%')}</td>"
+            f"<td>{html.escape(fmt_money(item.line_total))}</td>"
+            "</tr>"
+            for item in doc.line_items
+        )
+        st.markdown(
+            "<table class='lines'><thead><tr>"
+            "<th>Description</th><th>Qty</th><th>Unit price</th><th>VAT</th><th>Amount</th>"
+            f"</tr></thead><tbody>{cells}</tbody></table>",
+            unsafe_allow_html=True,
         )
     else:
         st.caption("No line items were extracted from this file.")
 
 
-def _row_tint(row: pd.Series):
-    if row["Status"] == "Flagged":
-        color = "background-color: #FDF2F0"
-    elif row["Status"] == "Warning":
-        color = "background-color: #FFF8E8"
-    else:
-        color = "background-color: #F6FAF7"
-    return [color] * len(row)
+def _fmt_qty(value) -> str:
+    text = f"{value.normalize():f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return text or "0"
 
 
 if __name__ == "__main__":

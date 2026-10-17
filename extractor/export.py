@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 from decimal import Decimal
 
@@ -115,6 +116,45 @@ def to_xlsx(reviewed: list[ReviewedDocument]) -> bytes:
     return buffer.getvalue()
 
 
+def review_table_html(reviewed: list[ReviewedDocument]) -> str:
+    rows = []
+    for rec in review_table_records(reviewed):
+        status = rec["Status"]
+        row_class = {"Flagged": "row-flag", "Warning": "row-warn"}.get(status, "row-ok")
+        badge = {"Flagged": "badge-flag", "Warning": "badge-warn"}.get(status, "badge-ok")
+        rows.append(
+            "<tr class='{row_class}'>"
+            "<td><span class='badge {badge}'>{status}</span></td>"
+            "<td>{supplier}</td>"
+            "<td>{number}</td>"
+            "<td>{doc_type}</td>"
+            "<td>{date}</td>"
+            "<td>{po}</td>"
+            "<td>{total}</td>"
+            "<td>{issues}</td>"
+            "</tr>".format(
+                row_class=row_class,
+                badge=badge,
+                status=html.escape(status),
+                supplier=html.escape(rec["Supplier"]),
+                number=html.escape(rec["Number"]),
+                doc_type=html.escape(rec["Type"]),
+                date=html.escape(rec["Date"] or "—"),
+                po=html.escape(rec["PO"]),
+                total=html.escape(rec["Total"]),
+                issues=html.escape(rec["Issues"]),
+            )
+        )
+    return (
+        "<table class='review'><thead><tr>"
+        "<th>Status</th><th>Supplier</th><th>Number</th><th>Type</th>"
+        "<th>Date</th><th>PO</th><th>Total</th><th>Issues</th>"
+        "</tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table>"
+    )
+
+
 def review_table_records(reviewed: list[ReviewedDocument]) -> list[dict[str, str]]:
     records = []
     for row in reviewed:
@@ -128,7 +168,7 @@ def review_table_records(reviewed: list[ReviewedDocument]) -> list[dict[str, str
                 "Date": _iso(doc.invoice_date or doc.delivery_date),
                 "PO": doc.po_number or "—",
                 "Total": fmt_money(doc.total, doc.currency),
-                "Issues": "; ".join(issue.message for issue in row.issues) or "—",
+                "Issues": " ".join(issue.message for issue in row.issues) or "—",
                 "File": doc.source_filename,
             }
         )

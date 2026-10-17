@@ -78,7 +78,7 @@ This MVP stops at a review table. A real AP rollout would need more than a bette
 
 ## Tech stack
 
-- Python 3.12, Streamlit, Pydantic, pandas
+- Python 3.12, Streamlit, Pydantic
 - pypdf for text, reportlab for the fictional sample PDFs
 - OpenAI-compatible API (OpenAI or Gemini) when a key is present
 - openpyxl for Excel export

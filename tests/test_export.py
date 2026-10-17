@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from extractor.export import document_rows, to_csv, to_xlsx
+from extractor.export import document_rows, review_table_html, to_csv, to_xlsx
 from extractor.models import ExtractedDocument, Issue, LineItem, ReviewedDocument
 
 
@@ -55,3 +55,10 @@ def test_document_rows_flatten_issues():
     rows = document_rows(_reviewed())
     assert rows[0]["status"] == "Flagged"
     assert rows[0]["line_count"] == "1"
+
+
+def test_review_table_html_marks_flagged_rows():
+    markup = review_table_html(_reviewed())
+    assert "row-flag" in markup
+    assert "INV-1" in markup
+    assert "VAT looks wrong." in markup
